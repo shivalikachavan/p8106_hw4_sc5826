@@ -1,0 +1,20 @@
+---
+title: "p8106_hw3_sc5826"
+author: "Shivalika Chavan"
+date: "2026-03-28"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(caret)
+library(car)
+library(corrplot)
+library(earth)
+library(vip)
+library(MASS)
+library(pROC)
+library(purrr)
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
