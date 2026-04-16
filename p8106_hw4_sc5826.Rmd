@@ -24,7 +24,7 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 ## 1 
 ```{r}
-college = read_csv("/data/College.csv") |> 
+college = read_csv("./data/College.csv") |> 
   janitor::clean_names() |> 
   select(-college)
 
@@ -119,3 +119,76 @@ test_rmse = RMSE(pred = gbmA_predictions, obs = testing_data$outstate)
 The tuned model had a test RMSE of `r round(test_rmse, 2)`. Looking at the top 5 variables from this model, instructional expenditure per student (`expend`), room and board costs (`room_board`), and percentage of faculty with terminal degrees (`terminal`) all affect tuition costs. This is in agreement with the random forest models in the previous section. 
 
 ## 2 
+## Data Cleaning and Test/Train Split:
+```{r}
+auto_data = read_csv("./data/auto.csv") |> 
+  mutate(
+    origin = factor(origin, levels = c("1", "2", "3"), 
+                    labels = c("American", "European", "Japanese")),
+    mpg_cat = factor(mpg_cat, levels = c("low", "high"))
+  )
+
+set.seed(1234)
+indexTrain = createDataPartition(y = auto_data$mpg_cat, p = 0.7, list = FALSE)
+auto_train = auto_data[indexTrain, ] 
+auto_test = auto_data[-indexTrain, ] 
+
+n_param = ncol(auto_data) - 1
+```
+
+### 2a - Classification Tree
+```{r}
+set.seed(1234)
+tree1 = rpart(formula = mpg_cat ~ . , 
+              data = auto_train, 
+              control = rpart.control(cp = 0))
+rpart.plot(tree1) # biggest possible tree
+
+cptable = tree1$cptable |> as.data.frame()
+cptable |> knitr::kable(digits = 4) 
+plotcp(tree1)
+
+# minimum cross-validation error; may also use the 1SE rule
+minErr = which.min(cptable$xerror)
+tree_min = rpart::prune(tree1, cp = cptable$CP[minErr])
+rpart.plot(tree_min)
+
+# 1SE Rule
+threshold = cptable$xerror[minErr] + cptable$xstd[minErr]
+se_row = min(which(cptable$xerror <= threshold))
+tree_1se = rpart::prune(tree1, cp = cptable$CP[se_row])
+rpart.plot(tree_1se)
+```
+
+The tree size corresponding to both lowest cross-validation error and the 1SE rule is 2. This makes sense since there are so few predictors to begin with. 
+
+### 2b - Boosting
+```{r}
+gbm.grid = expand.grid(n.trees = c(100, 500, 1000, 2000),
+                       interaction.depth = 1:5,
+                       shrinkage = c(0.001, 0.005, 0.01),
+                       n.minobsinnode = 10)
+
+ctrl = trainControl(method = "cv", 
+                    classProbs = TRUE, 
+                    summaryFunction = twoClassSummary)
+
+set.seed(1234)
+model_gbm = train(mpg_cat ~ ., 
+                  data = auto_train, 
+                  method = "gbm",
+                  distribution = "bernoulli",
+                  metric = "ROC",
+                  tuneGrid = gbm.grid,
+                  trControl = ctrl,
+                  verbose = FALSE)
+
+summary(model_gbm$finalModel, las = 2, cBars = 10)
+
+gbm_probs = predict(model_gbm, newdata = auto_test, type = "prob")$high
+gbm_roc = roc(auto_test$mpg_cat, gbm_probs)
+plot(gbm_roc)
+auc(gbm_roc)
+```
+
+The model achieved an AUC of `r round(auc(gbm_roc), 2)` on the test dataset. This means the model can distinguish well between cars with high and low predicted gas mileage. 
