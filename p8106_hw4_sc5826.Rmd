@@ -16,6 +16,7 @@ library(rpart.plot)
 library(party) # conditional inference tree, CIT
 library(partykit)
 library(pROC)
+library(ranger)
 
 
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
@@ -24,39 +25,95 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ## 1 
 ```{r}
 college = read_csv("College.csv") |> 
-  janitor::clean_names()
+  janitor::clean_names() |> 
+  select(-college)
 
 set.seed(1234)
-data_split <- initial_split(college, prop = 0.8)
+data_split = initial_split(college, prop = 0.8)
 
-training_data <- training(data_split)
-testing_data <- testing(data_split)
+training_data = training(data_split)
+testing_data = testing(data_split)
+n_param = ncol(college) - 1
 ```
 
+### 1a - Regression Tree
 ```{r}
-tree1 <- rpart(formula = outstate ~ . , 
-               data = training_data,
-               control = rpart.control(cp = 0.008))
+tree1 = rpart(formula = outstate ~ . , 
+              data = training_data,
+              control = rpart.control(cp = 0.008))
 
-rpart.plot(tree1, varlen = 0)
+rpart.plot(tree1)
 ```
 
+### 1b - Random Forest
 ```{r}
-tree <- rpart(formula = outstate ~ . , 
-               data = training_data,
-               control = rpart.control(cp = 0.008))
+ctrl = trainControl(method = "cv", number = 10)
 
-split.fun <- function(x, labs, digits, varlen, faclen)
-{
-    # replace commas with spaces (needed for strwrap)
-    labs <- gsub(",", " ", labs)
-    for(i in 1:length(labs)) {
-        # split labs[i] into multiple lines
-        labs[i] <- paste(strwrap(labs[i], width=25), collapse="\n")
-    }
-    labs
-}
+rf.grid = expand.grid(mtry = 1:n_param, # test all possible which is 1 to p (p = 16)
+                      splitrule = "variance", # split based on rss, no need to change
+                      min.node.size = c(2, 4, 6)) # smallest # of obs in each node
+set.seed(1234)
+rf.fit = train(outstate ~ . , 
+               data = training_data, 
+               method = "ranger", # better to use fast implementation
+               tuneGrid = rf.grid,
+               trControl = ctrl)
 
-prp(tree, split.fun=split.fun)e)
+ggplot(rf.fit, highlight = TRUE)
+
+set.seed(1234)
+rf.final.per = ranger(outstate ~ . , 
+                      training_data, 
+                      mtry = rf.fit$bestTune[[1]], 
+                      min.node.size = rf.fit$bestTune[[3]],
+                      splitrule = "variance",
+                      importance = "permutation",
+                      scale.permutation.importance = TRUE) 
+
+barplot(sort(ranger::importance(rf.final.per), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan","blue"))(8))
+
+set.seed(1234)
+rf.final.imp = ranger(outstate ~ . , 
+                      training_data, 
+                      mtry = rf.fit$bestTune[[1]], 
+                      splitrule = "variance",
+                      min.node.size = rf.fit$bestTune[[3]],
+                      importance = "impurity") 
+
+barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan","blue"))(8))
+
+rf_predictions = predict(rf.fit, newdata = testing_data)
+test_rmse = RMSE(pred = rf_predictions, obs = testing_data$outstate)
 ```
 
+The tuned RF model had a test RMSE of `r round(test_rmse, 2)`. Looking at the top 5 variables from both permutation and impurity importance metrics, instructional expenditure per student (`expend`), room and board costs (`room_board`), and percentage of faculty with terminal degrees (`terminal`) all affect tuition costs.  
+
+### 1c - Boosting
+```{r}
+gbmA.grid = expand.grid(n.trees = c(100,200,500,1000,2000,5000,10000),
+                        interaction.depth = 1:5,
+                        shrinkage = c(0.001, 0.003, 0.005),
+                        n.minobsinnode = 10)
+set.seed(1234)
+gbmA.fit = train(outstate ~ . , 
+                 training_data, 
+                 tuneGrid = gbmA.grid,
+                 trControl = ctrl,
+                 method = "gbm",
+                 distribution = "gaussian",
+                 metric = "RMSE",
+                 verbose = FALSE)
+
+ggplot(gbmA.fit, highlight = TRUE)
+
+summary(gbmA.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
+
+gbmA_predictions = predict(gbmA.fit, newdata = testing_data)
+test_rmse = RMSE(pred = gbmA_predictions, obs = testing_data$outstate)
+```
+
+The tuned model had a test RMSE of `r round(test_rmse, 2)`. Looking at the top 5 variables from this model, instructional expenditure per student (`expend`), room and board costs (`room_board`), and percentage of faculty with terminal degrees (`terminal`) all affect tuition costs. This is in agreement with the random forest models in the previous section. 
