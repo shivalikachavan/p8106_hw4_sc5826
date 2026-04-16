@@ -24,7 +24,7 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 ## 1 
 ```{r}
-college = read_csv("College.csv") |> 
+college = read_csv("/data/College.csv") |> 
   janitor::clean_names() |> 
   select(-college)
 
@@ -117,3 +117,5 @@ test_rmse = RMSE(pred = gbmA_predictions, obs = testing_data$outstate)
 ```
 
 The tuned model had a test RMSE of `r round(test_rmse, 2)`. Looking at the top 5 variables from this model, instructional expenditure per student (`expend`), room and board costs (`room_board`), and percentage of faculty with terminal degrees (`terminal`) all affect tuition costs. This is in agreement with the random forest models in the previous section. 
+
+## 2 
