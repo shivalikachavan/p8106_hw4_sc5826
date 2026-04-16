@@ -8,13 +8,55 @@ output: pdf_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(caret)
-library(car)
-library(corrplot)
-library(earth)
-library(vip)
-library(MASS)
+library(ISLR)
+library(mlbench)
+library(tidymodels)
+library(rpart) # CART, pruning
+library(rpart.plot)
+library(party) # conditional inference tree, CIT
+library(partykit)
 library(pROC)
-library(purrr)
+
 
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ```
+
+## 1 
+```{r}
+college = read_csv("College.csv") |> 
+  janitor::clean_names()
+
+set.seed(1234)
+data_split <- initial_split(college, prop = 0.8)
+
+training_data <- training(data_split)
+testing_data <- testing(data_split)
+```
+
+```{r}
+tree1 <- rpart(formula = outstate ~ . , 
+               data = training_data,
+               control = rpart.control(cp = 0.008))
+
+rpart.plot(tree1, varlen = 0)
+```
+
+```{r}
+tree <- rpart(formula = outstate ~ . , 
+               data = training_data,
+               control = rpart.control(cp = 0.008))
+
+split.fun <- function(x, labs, digits, varlen, faclen)
+{
+    # replace commas with spaces (needed for strwrap)
+    labs <- gsub(",", " ", labs)
+    for(i in 1:length(labs)) {
+        # split labs[i] into multiple lines
+        labs[i] <- paste(strwrap(labs[i], width=25), collapse="\n")
+    }
+    labs
+}
+
+prp(tree, split.fun=split.fun)e)
+```
+
